@@ -1,0 +1,3 @@
+.theia/*
+!.theia/settings.json
+/libraries
