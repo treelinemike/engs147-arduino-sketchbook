@@ -3,7 +3,8 @@
 
 #define ARRAY_SIZE    7500   // empirical max = 7500 with 3 arrays(unsigned long, long, and float)
 #define TS            5000   // [us] sampling period
-#define RECORD_TIME   2e6    // [us] duration to record data
+#define RECORD_TIME   10e6    // [us] duration to record data
+#define PWM_CMD       -400
 
 // encoder chip select pins
 int chipSelectPin1 = 10;
@@ -57,7 +58,7 @@ void loop() {  // treating loop() like main() here, and letting it repeat... our
 
   // turn motor on to 50% speed
   // NEGATIVE SIGN TO ACCOUNT FOR DIRECTION OF EXTERNAL ENCODER COUNT
-  md.setM1Speed(-200);
+  md.setM1Speed(PWM_CMD);
 
   // reset all pointers and array size
   ptr_time = arr_time;
