@@ -36,7 +36,7 @@ void setup() {
   delay(100);
 }
 
-void loop() {  // treating loop() like main() here, and letting it repeat... our actual loop is inside the
+void loop() {  // treating loop() like main() here, and letting it repeat... our actual sampling loop is nested within...
 
   // variables
   unsigned long arr_time[ARRAY_SIZE] = {};
