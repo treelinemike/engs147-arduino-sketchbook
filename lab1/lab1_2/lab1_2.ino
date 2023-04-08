@@ -1,7 +1,9 @@
 #include "ArduinoMotorShieldR3.h"
 #include <SPI.h>
 
-#define ARRAY_SIZE 7500  // max 7500 with 3 arrays( unsigned long, long, and float)
+#define ARRAY_SIZE    7500   // empirical max = 7500 with 3 arrays(unsigned long, long, and float)
+#define TS            5000   // [us] sampling period
+#define RECORD_TIME   2e6    // [us] duration to record data
 
 // encoder chip select pins
 int chipSelectPin1 = 10;
@@ -10,16 +12,6 @@ int chipSelectPin3 = 8;
 
 // motor shield object
 ArduinoMotorShieldR3 md;
-
-// globals
-volatile unsigned long mytime;
-unsigned long arr_time[ARRAY_SIZE] = {};
-long arr_pos[ARRAY_SIZE] = {};
-float arr_vel[ARRAY_SIZE] = {};
-unsigned long *ptr_time = nullptr;
-long *ptr_pos = nullptr;
-float *ptr_vel = nullptr;
-size_t array_size = 0;
 
 // setup routine
 void setup() {
@@ -44,14 +36,20 @@ void setup() {
   delay(100);
 }
 
-void loop() {
+void loop() {  // treating loop() like main() here, and letting it repeat... our actual loop is inside the
 
   // variables
-  unsigned long loopstart = 0;
-  long encoder3Value;
-  bool overrun_flag = false;
-  unsigned long dt;
-  long dcount;
+  unsigned long arr_time[ARRAY_SIZE] = {};
+  long arr_pos[ARRAY_SIZE] = {};
+  float arr_vel[ARRAY_SIZE] = {};
+  unsigned long *ptr_time = nullptr;
+  long *ptr_pos = nullptr;
+  float *ptr_vel = nullptr;
+  size_t array_size = 0;
+  unsigned long progstart, loopstart, curtime, dt;
+  long encoder3Value, dcount;
+  bool array_overrun_flag = false;
+  bool TS_overrun_flag = false;
 
   // make sure we're starting from rest
   md.setM1Speed(0);
@@ -68,25 +66,23 @@ void loop() {
   array_size = 0;
 
   // collect data for two seconds
-  mytime = micros();
-  if (!loopstart) {
-    loopstart = mytime;
-  }
-  while (mytime < (loopstart + 2e6)) {
+  curtime = micros();
+  progstart = curtime;
+  while (curtime < (progstart + RECORD_TIME)) {
 
-    // read encoder and get time
-    encoder3Value = getEncoderValue(3);
-    mytime = micros() - loopstart;
-
+    // read encoder
+    encoder3Value = getEncoderValue(3);  // as close to micros() as possible
+    loopstart = curtime;                 // absolute count of when this sampling period started
+    
     // store time, position, and velocity
-    *ptr_time = mytime;
+    *ptr_time = loopstart - progstart;  // time stored is [us] since this sampling period began
     *ptr_pos = encoder3Value;
     if (ptr_time == arr_time) {
-      *ptr_vel = 0;
+      *ptr_vel = 0;                     // report no speed on first iteration
     } else {
-      dcount = encoder3Value - *(ptr_pos - 1);
-      dt = mytime - *(ptr_time - 1);
-      *ptr_vel = (dcount * 1.0F / dt) * ((float)1e6);
+      dcount = encoder3Value - *(ptr_pos - 1);  
+      dt = *ptr_time - *(ptr_time - 1);
+      *ptr_vel = (dcount * 1.0F / dt) * ((float)1e6);   // simple first backward difference approximation to derivative
     }
 
     // increment pointers and array size
@@ -95,29 +91,35 @@ void loop() {
     ++ptr_vel;
     ++array_size;
 
-    // add an additional delay b/c we don't have enough memory to store on every cycle
-    // 10ms is about the lowest that works reasonably well here with our (low!) encoder resolution
-    delay(10);
-    //delayMicroseconds(250);
-
     // check for array overrun
+    // and reset pointers to avoid
+    // actually overrunning allocations
     if (array_size >= ARRAY_SIZE) {
       array_size = 0;
       ptr_time = arr_time;
       ptr_pos = arr_pos;
       ptr_vel = arr_vel;
-      overrun_flag = true;
+      array_overrun_flag = true;
       Serial.println("************ ARRAY OVERRUN ************");
     }
 
-    // get new time for comparison at top of while loop...
-    mytime = micros();
+    // check whether we overran sample time
+    curtime = micros();
+    if ((curtime - loopstart) > TS) {
+      TS_overrun_flag = true;
+    }
+
+    // enforce loop timing
+    curtime = micros();
+    while ((curtime - loopstart) < TS) {
+      curtime = micros();
+    }
   }
 
   // stop motor
   md.setM1Speed(0);
 
-  // print all stored data
+  // print all stored data in serial stream
   ptr_time = arr_time;
   ptr_pos = arr_pos;
   ptr_vel = arr_vel;
@@ -132,6 +134,12 @@ void loop() {
     ++ptr_vel;
   }
 
+  // print warning if we overran TS at any point
+  if (TS_overrun_flag) {
+    Serial.println("************ SAMPLE TIME OVERRUN ************");
+  }
+
+  // wait before doing it all again
   delay(3000);
 }
 
