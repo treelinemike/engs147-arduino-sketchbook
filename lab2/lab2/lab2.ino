@@ -135,7 +135,7 @@ void loop() {  // treating loop() like main() here, and letting it repeat... our
       ++ptr_pwm;
       ++array_size;
 
-      // save time that loop started
+      // save time that this run of the loop started
       prevloopstart = curtime;  // absolute count of when this sampling period started
 
       // check for array overrun
@@ -153,7 +153,7 @@ void loop() {  // treating loop() like main() here, and letting it repeat... our
         Serial.println("************ ARRAY OVERRUN ************");
       }
 
-      // check whether we overran sample time
+      // check whether we overran the sample period
       curtime = micros();
       if ((curtime - prevloopstart) > TS) {
         TS_overrun_flag = true;

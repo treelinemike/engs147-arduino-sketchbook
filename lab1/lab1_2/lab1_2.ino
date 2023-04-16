@@ -1,9 +1,9 @@
 #include "ArduinoMotorShieldR3.h"
 #include <SPI.h>
 
-#define ARRAY_SIZE    7500   // empirical max = 7500 with 3 arrays(unsigned long, long, and float)
-#define TS            5000   // [us] sampling period
-#define RECORD_TIME   2e6    // [us] duration to record data
+#define ARRAY_SIZE 7500  // empirical max = 7500 with 3 arrays(unsigned long, long, and float)
+#define TS 5000          // [us] sampling period
+#define RECORD_TIME 2e6  // [us] duration to record data
 
 // encoder chip select pins
 int chipSelectPin1 = 10;
@@ -24,11 +24,7 @@ void setup() {
   md.init();
 
   // set up encoder shield
-  pinMode(chipSelectPin1, OUTPUT);
-  pinMode(chipSelectPin2, OUTPUT);
   pinMode(chipSelectPin3, OUTPUT);
-  digitalWrite(chipSelectPin1, HIGH);
-  digitalWrite(chipSelectPin2, HIGH);
   digitalWrite(chipSelectPin3, HIGH);
   LS7366_Init();
 
@@ -46,7 +42,7 @@ void loop() {  // treating loop() like main() here, and letting it repeat... our
   long *ptr_pos = nullptr;
   float *ptr_vel = nullptr;
   size_t array_size = 0;
-  unsigned long progstart, loopstart, curtime, dt;
+  unsigned long progstart, prevloopstart, curtime, dt;
   long encoder3Value, dcount;
   bool array_overrun_flag = false;
   bool TS_overrun_flag = false;
@@ -68,51 +64,62 @@ void loop() {  // treating loop() like main() here, and letting it repeat... our
   // collect data for two seconds
   curtime = micros();
   progstart = curtime;
+  prevloopstart = curtime;
   while (curtime < (progstart + RECORD_TIME)) {
 
-    // read encoder
-    encoder3Value = getEncoderValue(3);  // as close to micros() as possible
-    loopstart = curtime;                 // absolute count of when this sampling period started
-    
-    // store time, position, and velocity
-    *ptr_time = loopstart - progstart;  // time stored is [us] since this sampling period began
-    *ptr_pos = encoder3Value;
-    if (ptr_time == arr_time) {
-      *ptr_vel = 0;                     // report no speed on first iteration
-    } else {
-      dcount = encoder3Value - *(ptr_pos - 1);  
-      dt = *ptr_time - *(ptr_time - 1);
-      *ptr_vel = (dcount * 1.0F / dt) * ((float)1e6);   // simple first backward difference approximation to derivative
-    }
-
-    // increment pointers and array size
-    ++ptr_time;
-    ++ptr_pos;
-    ++ptr_vel;
-    ++array_size;
-
-    // check for array overrun
-    // and reset pointers to avoid
-    // actually overrunning allocations
-    if (array_size >= ARRAY_SIZE) {
-      array_size = 0;
-      ptr_time = arr_time;
-      ptr_pos = arr_pos;
-      ptr_vel = arr_vel;
-      array_overrun_flag = true;
-      Serial.println("************ ARRAY OVERRUN ************");
-    }
-
-    // check whether we overran sample time
-    curtime = micros();
-    if ((curtime - loopstart) > TS) {
-      TS_overrun_flag = true;
-    }
-
     // enforce loop timing
+    // and ensure that we capture a sample right away
+    // first sample or two may be very slightly longer duration
     curtime = micros();
-    while ((curtime - loopstart) < TS) {
-      curtime = micros();
+    if (((curtime - prevloopstart) >= TS) || !array_size) {
+
+      // TIME CRITICAL OPERATIONS
+
+      // read encoder
+      encoder3Value = getEncoderValue(3);  // as close to micros() as possible
+
+      // compute velocity (may be needed for real time control)
+      if (ptr_time == arr_time) {
+        *ptr_vel = 0;  // report no speed on first iteration
+      } else {
+        dcount = encoder3Value - *(ptr_pos - 1);
+        dt = (curtime - progstart) - *(ptr_time - 1);
+        *ptr_vel = (dcount * 1.0F / dt) * ((float)1e6);  // simple first backward difference approximation to derivative
+      }
+
+      // END OF TIME CRITICAL OPERATIOSN
+
+      // store time and position
+      *ptr_time = curtime - progstart;  // time stored is [us] since this sampling period began
+      *ptr_pos = encoder3Value;
+
+      // increment pointers and array size
+      ++ptr_time;
+      ++ptr_pos;
+      ++ptr_vel;
+      ++array_size;
+
+      // save time that this run of the loop started
+      prevloopstart = curtime;  // absolute count of when this sampling period started
+
+
+      // check for array overrun
+      // and reset pointers to avoid
+      // actually overrunning allocations
+      if (array_size >= ARRAY_SIZE) {
+        array_size = 0;
+        ptr_time = arr_time;
+        ptr_pos = arr_pos;
+        ptr_vel = arr_vel;
+        array_overrun_flag = true;
+        Serial.println("************ ARRAY OVERRUN ************");
+      }
+
+      // check whether we overran the sample period
+      curtime = micros();  // this is also important for evaluation of the while() condition next time around
+      if ((curtime - prevloopstart) > TS) {
+        TS_overrun_flag = true;
+      }
     }
   }
 
